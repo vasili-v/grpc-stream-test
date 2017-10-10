@@ -7,19 +7,31 @@ import (
 	"io"
 	"net"
 	"sync"
-	"time"
 
 	"google.golang.org/grpc"
 
 	pb "github.com/vasili-v/grpc-stream-test/gst-server/stream"
 )
 
+func handler(in *pb.Request) *pb.Response {
+	out := pb.Response{
+		Id:      in.Id,
+		Payload: make([]byte, len(in.Payload)),
+	}
+
+	for i := range out.Payload {
+		out.Payload[i] ^= 0x55
+	}
+
+	return &out
+}
+
 type server struct{}
 
 func (s *server) Test(stream pb.Stream_TestServer) error {
 	fmt.Println("got new stream")
 
-	ch := make(chan pb.Response)
+	ch := make(chan *pb.Response)
 	th := make(chan int, limit)
 	go func() {
 		defer close(ch)
@@ -47,19 +59,13 @@ func (s *server) Test(stream pb.Stream_TestServer) error {
 					wg.Done()
 				}()
 
-				time.Sleep(2 * time.Microsecond)
-
-				ch <- pb.Response{
-					Id:          in.Id,
-					Status:      time.Now().Format(time.RFC3339Nano),
-					Obligations: in.Attributes,
-				}
+				ch <- handler(in)
 			}(in)
 		}
 	}()
 
 	for out := range ch {
-		err := stream.Send(&out)
+		err := stream.Send(out)
 		if err != nil {
 			fmt.Printf("sending error: %s\n", err)
 			return err
@@ -75,7 +81,15 @@ func main() {
 		panic(err)
 	}
 
-	p := grpc.NewServer()
+	opts := []grpc.ServerOption{}
+	if compression {
+		opts = append(opts,
+			grpc.RPCCompressor(grpc.NewGZIPCompressor()),
+			grpc.RPCDecompressor(grpc.NewGZIPDecompressor()),
+		)
+	}
+
+	p := grpc.NewServer(opts...)
 	pb.RegisterStreamServer(p, &server{})
 	err = p.Serve(ln)
 	if err != nil {

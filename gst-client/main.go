@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"time"
 
@@ -22,27 +23,20 @@ type pair struct {
 }
 
 func main() {
-	c, err := grpc.Dial(server, grpc.WithInsecure())
+	pairs := newPairs(total, size)
+
+	opts := []grpc.DialOption{grpc.WithInsecure()}
+	if compression {
+		opts = append(opts,
+			grpc.WithCompressor(grpc.NewGZIPCompressor()),
+			grpc.WithDecompressor(grpc.NewGZIPDecompressor()),
+		)
+	}
+	c, err := grpc.Dial(server, opts...)
 	if err != nil {
 		panic(fmt.Errorf("dialing error: %s", err))
 	}
 	defer c.Close()
-
-	pairs := make([]*pair, total)
-	for i := range pairs {
-		pairs[i] = &pair{
-			req: &pb.Request{
-				Id: uint32(i),
-				Attributes: []*pb.Attribute{
-					{
-						Id:    "test",
-						Type:  "string",
-						Value: "test",
-					},
-				},
-			},
-		}
-	}
 
 	s, err := pb.NewStreamClient(c).Test(context.Background())
 	if err != nil {
@@ -117,4 +111,44 @@ func main() {
 	}
 
 	dump(pairs, "")
+}
+
+func newPairs(n, size int) []*pair {
+	out := make([]*pair, n)
+
+	if size > 0 {
+		fmt.Fprintf(os.Stderr, "making messages to send:\n")
+	}
+
+	for i := range out {
+		if size > 0 {
+			buf := make([]byte, size)
+			if random {
+				for j := range buf {
+					buf[j] = byte(rand.Intn(256))
+				}
+			} else {
+				for j := range buf {
+					buf[j] = 0xaa
+				}
+			}
+
+			if i < 3 {
+				fmt.Fprintf(os.Stderr, "\t%d: % x\n", i, buf)
+			} else if i == 3 {
+				fmt.Fprintf(os.Stderr, "\t%d: ...\n", i)
+			}
+
+			out[i] = &pair{
+				req: &pb.Request{
+					Id:      uint32(i),
+					Payload: buf,
+				},
+			}
+		} else {
+			out[i] = &pair{}
+		}
+	}
+
+	return out
 }
