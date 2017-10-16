@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sync"
 	"time"
 
 	"golang.org/x/net/context"
@@ -38,6 +39,95 @@ func main() {
 	}
 	defer c.Close()
 
+	if clients > 1 {
+		var wg sync.WaitGroup
+
+		step := len(pairs) / clients
+		if step <= 0 {
+			step = 1
+		}
+
+		client := pb.NewStreamClient(c)
+
+		for i := 0; i*step < len(pairs); i++ {
+			s, err := client.Test(context.Background())
+			if err != nil {
+				panic(fmt.Errorf("rpc error: %s", err))
+			}
+
+			start := i * step
+			end := start + step
+			if end > len(pairs) {
+				end = len(pairs)
+			}
+
+			wg.Add(1)
+			go func(s pb.Stream_TestClient, chunk []*pair) {
+				defer wg.Done()
+
+				testStreamSync(s, chunk, start)
+			}(s, pairs[start:end])
+		}
+
+		wg.Wait()
+	}
+
+	dump(pairs, "")
+}
+
+func testStreamSync(s pb.Stream_TestClient, pairs []*pair, start int) {
+	miss := 0
+
+	for i, p := range pairs {
+		p.sent = time.Now()
+		err := s.Send(p.req)
+		if err != nil {
+			panic(fmt.Errorf("sending error: %s", err))
+		}
+
+		res, err := s.Recv()
+		if err != nil {
+			panic(fmt.Errorf("receiving error at %d: %s", i+1, err))
+		}
+
+		j := int(res.Id) - start
+		if j >= 0 && j < len(pairs) {
+			p := pairs[j]
+			if p.req.Id == res.Id {
+				if p.recv == nil {
+					t := time.Now()
+					p.recv = &t
+				} else {
+					p.dup++
+				}
+			} else {
+				miss++
+			}
+		} else {
+			miss++
+		}
+	}
+
+	err := s.CloseSend()
+	if err != nil {
+		panic(fmt.Errorf("closing error: %s", err))
+	}
+
+	if miss > 0 {
+		panic(fmt.Errorf("got %d messages with invalid ids", miss))
+	}
+
+	dup := 0
+	for _, p := range pairs {
+		dup += p.dup
+	}
+
+	if dup > 0 {
+		panic(fmt.Errorf("got %d duplicates", dup))
+	}
+}
+
+func testStream(c *grpc.ClientConn, pairs []*pair) {
 	s, err := pb.NewStreamClient(c).Test(context.Background())
 	if err != nil {
 		panic(fmt.Errorf("rpc error: %s", err))
@@ -109,8 +199,6 @@ func main() {
 	if dup > 0 {
 		panic(fmt.Errorf("got %d duplicates", dup))
 	}
-
-	dump(pairs, "")
 }
 
 func newPairs(n, size int) []*pair {

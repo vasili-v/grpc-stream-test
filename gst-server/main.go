@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"sync"
 
 	"google.golang.org/grpc"
 
@@ -29,6 +28,30 @@ func handler(in *pb.Request) *pb.Response {
 type server struct{}
 
 func (s *server) Test(stream pb.Stream_TestServer) error {
+	fmt.Println("got new stream")
+	for {
+		in, err := stream.Recv()
+		if err == io.EOF {
+			fmt.Println("stream depleted")
+			break
+		}
+
+		if err != nil {
+			fmt.Printf("receiving error: %s\n", err)
+			return err
+		}
+
+		err = stream.Send(handler(in))
+		if err != nil {
+			fmt.Printf("sending error: %s\n", err)
+			return err
+		}
+	}
+
+	return nil
+}
+
+/*func (s *server) Test(stream pb.Stream_TestServer) error {
 	fmt.Println("got new stream")
 
 	ch := make(chan *pb.Response)
@@ -73,7 +96,7 @@ func (s *server) Test(stream pb.Stream_TestServer) error {
 	}
 
 	return nil
-}
+}*/
 
 func main() {
 	ln, err := net.Listen("tcp", address)
