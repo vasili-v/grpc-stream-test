@@ -1,27 +1,20 @@
 package main
 
-import (
-	"flag"
-	"time"
-)
+import "flag"
 
 var (
-	server      string
-	total       int
-	clients     int
-	size        int
-	timeout     time.Duration
-	compression bool
-	random      bool
+	server  string
+	total   int
+	streams int
+	size    int
+	random  bool
 )
 
 func init() {
 	flag.StringVar(&server, "s", ":5555", "address:port of server")
 	flag.IntVar(&total, "n", 5, "number of requests to send")
-	flag.IntVar(&clients, "c", 1, "number of parallel gRPC streams")
-	flag.IntVar(&size, "size", 60, "payload size")
-	flag.DurationVar(&timeout, "t", 2*time.Minute, "time to wait for responses")
-	flag.BoolVar(&compression, "compr", false, "enable stream compression")
+	flag.IntVar(&streams, "c", 1, "number of parallel gRPC streams")
+	flag.IntVar(&size, "size", 100, "payload size")
 	flag.BoolVar(&random, "r", false, "enable random payload")
 
 	flag.Parse()

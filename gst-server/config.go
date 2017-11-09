@@ -3,15 +3,13 @@ package main
 import "flag"
 
 var (
-	address     string
-	limit       int
-	compression bool
+	address    string
+	maxStreams int
 )
 
 func init() {
 	flag.StringVar(&address, "a", ":5555", "address:port for requests")
-	flag.IntVar(&limit, "l", 500, "max number of requests to handle in parallel")
-	flag.BoolVar(&compression, "c", false, "enable stream compression")
+	flag.IntVar(&maxStreams, "s", 0, "limit on the number of concurrent streams (0 - use gRPC default)")
 
 	flag.Parse()
 }

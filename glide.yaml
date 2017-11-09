@@ -1,0 +1,10 @@
+package: github.com/vasili-v/grpc-stream-test
+import:
+- package: github.com/golang/protobuf
+  subpackages:
+  - proto
+- package: golang.org/x/net
+  subpackages:
+  - context
+- package: google.golang.org/grpc
+  version: abd3e10d785b2ef7e32b5207eb7c303301a4ac84
