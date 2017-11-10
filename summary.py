@@ -3,28 +3,68 @@
 import json
 import sys
 import time
+import os
+import re
 
 time_units = ["ns", "us", "ms", "s"]
 rate_units = ["", "k", "M", "G"]
 
-def summary(path):
-    sends, recvs, pairs = load(path)
-    print "%s Loaded %d samples" % (time.strftime("[%x %X]"), len(pairs))
+FILE_NAME_REGEX = re.compile("test-(\\d+)\\.json$")
 
-    print "%s %s" % (time.strftime("[%x %X]"), "Analysing latency...")
+def summary(path, csv):
+    if os.path.isdir(path):
+        names = []
+        for name in os.listdir(path):
+            match = FILE_NAME_REGEX.match(name)
+            if match:
+                names.append((int(match.group(1)), name))
+
+        avg_lats = []
+        hists_lat = []
+        avg_rates = []
+        hists_rate = []
+
+        for s, name in sorted(names, key=lambda x: x[0]):
+            avg_lat, hist_lat, avg_rate, hist_rate = single_summary(os.path.join(path, name))
+
+            avg_lats.append(avg_lat)
+            hists_lat.append(hist_lat)
+
+            avg_rates.append(avg_rate)
+            hists_rate.append(hist_rate)
+
+        for i in range(len(avg_lats)):
+            single_show(avg_lats[i], hists_lat[i], avg_rates[i], hists_rate[i], csv)
+            print ""
+
+    else:
+        avg_lat, hist_lat, avg_rate, hist_rate = single_summary(path)
+        single_show(avg_lat, hist_lat, avg_rate, hist_rate, csv)
+
+def single_summary(name):
+    sends, recvs, pairs = load(name)
+    print >> sys.stderr, "%s Loaded %d samples from %s" % (time.strftime("[%x %X]"), len(pairs), os.path.basename(name))
+
+    print >> sys.stderr, "%s %s" % (time.strftime("[%x %X]"), "Analysing latency...")
     avg_lat, hist_lat = lat(pairs)
     window = 10000000
     if len(hist_lat) == 12:
         window = 10*hist_lat[10]
 
     w, w_u = adjust_unit(window, time_units)
-    print "%s Window: %s%s" % (time.strftime("[%x %X]"), w, w_u)
+    print >> sys.stderr, "%s Window: %s%s" % (time.strftime("[%x %X]"), w, w_u)
 
-    print "%s %s" % (time.strftime("[%x %X]"), "Analysing rate...")
+    print >> sys.stderr, "%s %s" % (time.strftime("[%x %X]"), "Analysing rate...")
     avg_rate, hist_rate = rate(recvs, window)
 
-    show_lat(avg_lat, hist_lat, "Latency")
-    show_rate(avg_rate, hist_rate, "Rate")
+    return avg_lat, hist_lat, avg_rate, hist_rate
+
+def single_show(avg_lat, hist_lat, avg_rate, hist_rate, csv):
+    if csv:
+        dump(avg_lat, hist_lat, avg_rate, hist_rate)
+    else:
+        show_lat(avg_lat, hist_lat, "Latency")
+        show_rate(avg_rate, hist_rate, "Rate")
 
 def lat(pairs):
     lats = []
@@ -67,8 +107,8 @@ def rate(recvs, window):
         if end > start:
             rates.append(1e9*float(j - i + 1)/(end - start))
 
-        if (i + 1) % 100000 == 0:
-            print "%s %s" % (time.strftime("[%x %X]"), i+1)
+        if (i + 1) % 1000000 == 0:
+            print >> sys.stderr, "%s Processed %d timestamps" % (time.strftime("[%x %X]"), i+1)
 
         j += 1
         if j >= len(recvs):
@@ -120,6 +160,58 @@ def show_lat(avg, hist, title):
     else:
         print "%s %s%s" % (title, avg_x, avg_u)
 
+def dump(avg_lat, hist_lat, avg_rate, hist_rate):
+    print "Rate, x1000 QpS\t\tLatency, us\t"
+    print "Average\t%s\tAverage\t%s" % (avg_rate/1000., avg_lat/1000.)
+    if len(hist_rate) > 0 and len(hist_lat) > 0:
+        print "Min\t%s\tMin\t%s" % (hist_rate[0]/1000., hist_lat[0]/1000.)
+        print "Max\t%s\tMax\t%s" % (hist_rate[-1]/1000., hist_lat[-1]/1000.)
+        if len(hist_rate) == 12 and len(hist_lat) == 12:
+            print "0%%\t%s\t0%%\t%s" % (hist_rate[11]/1000., hist_lat[0]/1000.)
+            print "5%%\t%s\t10%%\t%s" % (hist_rate[10]/1000., hist_lat[1]/1000.)
+            print "10%%\t%s\t20%%\t%s" % (hist_rate[9]/1000., hist_lat[2]/1000.)
+            print "20%%\t%s\t30%%\t%s" % (hist_rate[8]/1000., hist_lat[3]/1000.)
+            print "30%%\t%s\t40%%\t%s" % (hist_rate[7]/1000., hist_lat[4]/1000.)
+            print "40%%\t%s\t50%%\t%s" % (hist_rate[6]/1000., hist_lat[5]/1000.)
+            print "50%%\t%s\t60%%\t%s" % (hist_rate[5]/1000., hist_lat[6]/1000.)
+            print "60%%\t%s\t70%%\t%s" % (hist_rate[4]/1000., hist_lat[7]/1000.)
+            print "70%%\t%s\t80%%\t%s" % (hist_rate[3]/1000., hist_lat[8]/1000.)
+            print "80%%\t%s\t90%%\t%s" % (hist_rate[2]/1000., hist_lat[9]/1000.)
+            print "90%%\t%s\t95%%\t%s" % (hist_rate[1]/1000., hist_lat[10]/1000.)
+            print "100%%\t%s\t100%%\t%s" % (hist_rate[0]/1000., hist_lat[11]/1000.)
+    elif len(hist_rate) > 0:
+        print "Min\t%s\t\t" % (hist_rate[0]/1000.)
+        print "Max\t%s\t\t" % (hist_rate[-1]/1000.)
+        if len(hist_rate) == 12:
+            print "0%%\t%s\t\t" % (hist_rate[11]/1000.)
+            print "5%%\t%s\t\t" % (hist_rate[10]/1000.)
+            print "10%%\t%s\t\t" % (hist_rate[9]/1000.)
+            print "20%%\t%s\t\t" % (hist_rate[8]/1000.)
+            print "30%%\t%s\t\t" % (hist_rate[7]/1000.)
+            print "40%%\t%s\t\t" % (hist_rate[6]/1000.)
+            print "50%%\t%s\t\t" % (hist_rate[5]/1000.)
+            print "60%%\t%s\t\t" % (hist_rate[4]/1000.)
+            print "70%%\t%s\t\t" % (hist_rate[3]/1000.)
+            print "80%%\t%s\t\t" % (hist_rate[2]/1000.)
+            print "90%%\t%s\t\t" % (hist_rate[1]/1000.)
+            print "100%%\t%s\t\t" % (hist_rate[0]/1000.)
+    elif len(hist_lat) > 0:
+        print "\t\tMin\t%s" % hist_lat[0]/1000.
+        print "\t\tMax\t%s" % hist_lat[-1]/1000.
+        if len(hist_lat) == 12:
+            print "\t\t0%%\t%s" % (hist_lat[0]/1000.)
+            print "\t\t10%%\t%s" % (hist_lat[1]/1000.)
+            print "\t\t20%%\t%s" % (hist_lat[2]/1000.)
+            print "\t\t30%%\t%s" % (hist_lat[3]/1000.)
+            print "\t\t40%%\t%s" % (hist_lat[4]/1000.)
+            print "\t\t50%%\t%s" % (hist_lat[5]/1000.)
+            print "\t\t60%%\t%s" % (hist_lat[6]/1000.)
+            print "\t\t70%%\t%s" % (hist_lat[7]/1000.)
+            print "\t\t80%%\t%s" % (hist_lat[8]/1000.)
+            print "\t\t90%%\t%s" % (hist_lat[9]/1000.)
+            print "\t\t95%%\t%s" % (hist_lat[10]/1000.)
+            print "\t\t100%%\t%s" % (hist_lat[11]/1000.)
+
 def show_rate(avg, hist, title):
     avg_x, avg_u = adjust_unit(avg, rate_units)
     if len(hist) > 0:
@@ -167,10 +259,14 @@ def load(name):
 
 def main():
     if len(sys.argv) < 2:
-        print "Specify input file"
+        print "Specify input file or directory"
         return 2
 
-    summary(sys.argv[1])
+    csv = False
+    if len(sys.argv) > 2 and sys.argv[1].lower()[1:] == "csv":
+        csv = True
+
+    summary(sys.argv[-1], csv)
 
     return 0
 
